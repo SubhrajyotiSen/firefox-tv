@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import kotlinx.android.synthetic.main.browser_overlay.*
 import kotlinx.android.synthetic.main.browser_overlay.view.*
+import kotlinx.android.synthetic.main.firefox_progress_bar.*
 import kotlinx.android.synthetic.main.fragment_browser.*
 import kotlinx.android.synthetic.main.fragment_browser.view.*
 import kotlinx.coroutines.experimental.CancellationException
@@ -126,7 +127,7 @@ class BrowserFragment : EngineViewLifecycleFragment(), Session.Observer {
                 (activity as MainActivity).onNonTextInputUrlEntered(value!!)
                 setOverlayVisible(false)
             }
-            NavigationEvent.POCKET -> ScreenController.showPocketScreen(fragmentManager!!)
+            NavigationEvent.POCKET -> ScreenController.showPocketScreen(fragmentManager!!, this)
             NavigationEvent.PIN_ACTION -> {
                 this@BrowserFragment.session.url.let { url ->
                     when (value) {
@@ -207,6 +208,11 @@ class BrowserFragment : EngineViewLifecycleFragment(), Session.Observer {
         super.onStop()
 
         sessionFeature?.stop()
+    }
+
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (!hidden) navUrlInput?.requestFocus()
     }
 
     override fun onContextItemSelected(item: MenuItem): Boolean {
