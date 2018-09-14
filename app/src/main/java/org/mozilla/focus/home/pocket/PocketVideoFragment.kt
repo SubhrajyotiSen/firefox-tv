@@ -18,14 +18,13 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import kotlinx.android.synthetic.main.fragment_pocket_video.*
-import kotlinx.android.synthetic.main.fragment_pocket_video.view.*
 import kotlinx.coroutines.experimental.Job
 import kotlinx.coroutines.experimental.android.UI
 import kotlinx.coroutines.experimental.launch
-import kotlinx.coroutines.experimental.withContext
 import mozilla.components.browser.session.Session
 import org.mozilla.focus.R
 import org.mozilla.focus.ScreenController
+import org.mozilla.focus.ext.forceExhaustive
 import org.mozilla.focus.ext.isNotCompleted
 import org.mozilla.focus.ext.resetAfter
 import org.mozilla.focus.ext.updateLayoutParams
@@ -62,17 +61,18 @@ class PocketVideoFragment : Fragment() {
 
     override fun onStart() {
         super.onStart()
-        fun displayFeed(videos: List<PocketVideo>) {
-            videoFeed.gridView.adapter = PocketVideoAdapter(context!!, videos, fragmentManager!!)
+        val adapter = PocketVideoAdapter(context!!, fragmentManager!!).also {
+            videoFeed.gridView.adapter = it
         }
         fun setupLoadingIfApplicable() {
             if (deferredVideos.isNotCompleted()) {
-                //TODO set up loading UI
+                val placeholders = List(20) { PocketPlaceholder }
+                adapter.setVideos(placeholders)
             }
         }
         fun displayFeedOrError(videos: List<PocketVideo>?) {
             if (videos != null) {
-                displayFeed(videos)
+                adapter.setVideos(videos)
             } else {
                 // TODO: #769: display error screen.
             }
@@ -110,9 +110,10 @@ class PocketVideoFragment : Fragment() {
 
 private class PocketVideoAdapter(
     context: Context,
-    private val pocketVideos: List<PocketVideo>,
     private val fragmentManager: FragmentManager
 ) : RecyclerView.Adapter<PocketVideoViewHolder>() {
+
+    private val pocketVideos = mutableListOf<PocketFeedItem>()
 
     private val photonGrey70 = ContextCompat.getColor(context, R.color.photonGrey70)
     private val photonGrey60 = ContextCompat.getColor(context, R.color.photonGrey60)
@@ -121,6 +122,12 @@ private class PocketVideoAdapter(
 
     private val videoItemHorizontalMargin = context.resources.getDimensionPixelSize(R.dimen.pocket_video_item_horizontal_margin)
     private val feedHorizontalMargin = context.resources.getDimensionPixelSize(R.dimen.pocket_feed_horizontal_margin)
+
+    fun setVideos(videos: List<PocketFeedItem>) {
+        pocketVideos.clear()
+        pocketVideos.addAll(videos)
+        notifyDataSetChanged()
+    }
 
     override fun getItemCount() = pocketVideos.size
 
@@ -131,32 +138,53 @@ private class PocketVideoAdapter(
         val item = pocketVideos[position]
         setHorizontalMargins(holder, position)
 
-        holder.itemView.setOnClickListener {
-            ScreenController.showBrowserScreenForUrl(holder.itemView.context, fragmentManager, item.url, Session.Source.HOME_SCREEN)
-            TelemetryWrapper.pocketVideoClickEvent(item.id)
+        when (item) {
+            is PocketPlaceholder -> bindPlaceholder(holder)
+            is PocketVideo -> bindPocketVideo(holder, item)
+        }.forceExhaustive
+    }
+
+    private fun bindPlaceholder(holder: PocketVideoViewHolder) {
+        with(holder) {
+            itemView.setOnClickListener(null)
+            itemView.onFocusChangeListener = null
+            titleView.text = ""
+            domainView.text = ""
+            videoThumbnailView.setImageResource(R.color.photonGrey50)
         }
-        holder.itemView.setOnFocusChangeListener { _, hasFocus -> updateForFocusState(holder, hasFocus) }
-        updateForFocusState(holder, holder.itemView.isFocused)
+    }
 
-        titleView.text = item.title
-        PicassoWrapper.client.load(item.thumbnailURL).into(videoThumbnailView)
-
-        @Suppress("TooGenericExceptionCaught") // See below.
-        val itemURI = try {
-            URI(item.url)
-        } catch (e: Exception) { // Apparently Kotlin doesn't have multi-catch.
-            when (e) {
-                is URISyntaxException, is NullPointerException -> null
-                else -> throw e
+    private fun bindPocketVideo(holder: PocketVideoViewHolder, item: PocketVideo) {
+        with(holder) {
+            holder.itemView.setOnClickListener {
+                // If the [PocketVideo] has no url field, assume it is a placeholder
+                // with no click action
+                ScreenController.showBrowserScreenForUrl(holder.itemView.context, fragmentManager, item.url, Session.Source.HOME_SCREEN)
+                TelemetryWrapper.pocketVideoClickEvent(item.id)
             }
-        }
-        domainView.text = if (itemURI == null) {
-            item.url
-        } else {
-            // The first time this method is called ever, it may block until the file is cached on disk.
-            // We pre-cache on startup so I'm hoping this isn't an issue.
-            StrictMode.allowThreadDiskReads().resetAfter {
-                FormattedDomain.format(holder.itemView.context, itemURI, false, 0)
+            holder.itemView.setOnFocusChangeListener { _, hasFocus -> updateForFocusState(holder, hasFocus) }
+            updateForFocusState(holder, holder.itemView.isFocused)
+
+            titleView.text = item.title
+            PicassoWrapper.client.load(item.thumbnailURL).into(videoThumbnailView)
+
+            @Suppress("TooGenericExceptionCaught") // See below.
+            val itemURI = try {
+                URI(item.url)
+            } catch (e: Exception) { // Apparently Kotlin doesn't have multi-catch.
+                when (e) {
+                    is URISyntaxException, is NullPointerException -> null
+                    else -> throw e
+                }
+            }
+            domainView.text = if (itemURI == null) {
+                item.url
+            } else {
+                // The first time this method is called ever, it may block until the file is cached on disk.
+                // We pre-cache on startup so I'm hoping this isn't an issue.
+                StrictMode.allowThreadDiskReads().resetAfter {
+                    FormattedDomain.format(holder.itemView.context, itemURI, false, 0)
+                }
             }
         }
     }
